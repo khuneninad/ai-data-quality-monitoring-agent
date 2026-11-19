@@ -1,0 +1,278 @@
+{
+  "name": "AI Data Quality Monitoring Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "https://dummyjson.com/products?limit=100",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        224,
+        0
+      ],
+      "id": "8b4acf48-10fb-4b8d-bcd3-a1808077b650",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=\nYou are an expert Data Quality Analyst.\n\nAnalyze the following data quality monitoring results.\n\nEvaluate:\n1. Overall data quality score.\n2. Number of passed and failed records.\n3. Types of validation failures.\n4. Potential business impact.\n5. Recommended corrective actions.\n\nRules:\n- Only use the supplied data.\n- Never invent statistics.\n- If there are no failures, explicitly state that.\n- Be concise and professional.\n\nReturn your report using these headings:\n\nEXECUTIVE SUMMARY\nDATA QUALITY FINDINGS\nBUSINESS IMPACT\nRECOMMENDATIONS\nFINAL STATUS\n\nDATA QUALITY INPUT:\n\n{{ JSON.stringify($json) }}\n\nFORMATTING RULES:\n- Do not use Markdown formatting.\n- Do not use **, *, #, or backticks.\n- Use plain text section headings in UPPERCASE.\n- Use numbered lists for recommendations.\n- Keep one blank line between sections.\n- Return clean, professional plain text only.",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": []
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        672,
+        0
+      ],
+      "id": "580d22a0-dd32-4641-b4d2-ae0c075cd7b4",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-20b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        608,
+        208
+      ],
+      "id": "c44f8db6-5fe8-45a6-b60e-6504689fbb79",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "KX9Pi9qIo44kYNfU",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO data_quality_reports (\n    total_records,\n    passed_records,\n    failed_records,\n    quality_score,\n    ai_report\n)\nVALUES (\n    {{ $('Code').first().json.total_records }},\n    {{ $('Code').first().json.passed_records }},\n    {{ $('Code').first().json.failed_records }},\n    {{ $('Code').first().json.quality_score }},\n    '{{ $(\"Basic LLM Chain\").first().json.text.replace(/'/g, \"''\") }}'\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        992,
+        0
+      ],
+      "id": "40768647-134f-494e-bbdc-f3558a4de68a",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "romyIyMdJ4MgjIsn",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst response = $input.first().json;\nconst products = response.products || [];\n\nconst seenIds = new Set();\nconst results = [];\n\nfor (const product of products) {\n  const issues = [];\n\n  // Check missing fields\n  if (!product.id) issues.push(\"Missing product ID\");\n  if (!product.title) issues.push(\"Missing title\");\n  if (product.price === undefined || product.price === null) {\n    issues.push(\"Missing price\");\n  }\n\n  // Check invalid values\n  if (typeof product.price !== \"number\" || product.price <= 0) {\n    issues.push(\"Invalid price\");\n  }\n\n  if (typeof product.stock !== \"number\" || product.stock < 0) {\n    issues.push(\"Invalid stock\");\n  }\n\n  // Check duplicate IDs\n  if (seenIds.has(product.id)) {\n    issues.push(\"Duplicate product ID\");\n  }\n  seenIds.add(product.id);\n\n  results.push({\n    json: {\n      product_id: product.id ?? null,\n      title: product.title ?? null,\n      price: product.price ?? null,\n      stock: product.stock ?? null,\n      category: product.category ?? null,\n      quality_status: issues.length === 0 ? \"PASS\" : \"FAIL\",\n      issue_count: issues.length,\n      issues: issues\n    }\n  });\n}\n\nconst failed = results.filter(item =>\n  item.json.quality_status === \"FAIL\"\n).length;\n\nreturn [\n  {\n    json: {\n      total_records: results.length,\n      passed_records: results.length - failed,\n      failed_records: failed,\n      quality_score: results.length\n        ? Number(((results.length - failed) / results.length * 100).toFixed(2))\n        : 0,\n      validation_results: results.map(item => item.json)\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "fcf14167-4a47-4637-b9e4-040cea54f7cf",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "fromEmail": "ninadkhune3@gmail.com",
+        "toEmail": "ninadkhune2@gmail.com",
+        "subject": "AI Data Quality Monitoring Report - n8n Self Projects",
+        "html": "=<h2>AI Data Quality Monitoring Report</h2>\n\n<p>Hello,</p>\n<p>Your latest monitoring report is ready.</p>\n\n<div style=\"font-family:Arial;line-height:1.6;\">\n  <pre style=\"white-space:pre-wrap;font-family:Arial;\">\n{{ $('Basic LLM Chain').first().json.text }}\n  </pre>\n</div>\n\n<hr>\n<p><b>AI Data Quality Monitoring Agent</b></p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1456,
+        -96
+      ],
+      "id": "3c544866-c676-410f-bbd3-97fb9863b25d",
+      "name": "Send an Email",
+      "webhookId": "eec9f5b1-29d4-4b07-92f6-eacbff1c04d4",
+      "credentials": {
+        "smtp": {
+          "id": "F7IAxnYthQ4XFtk6",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "fe686d5a-d9e5-45dd-8ec2-016c1adfcdd1",
+              "leftValue": "={{ $('Code').first().json.failed_records }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1184,
+        0
+      ],
+      "id": "4e58acf7-71e7-46d2-8514-63c2e8963361",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -80,
+        96
+      ],
+      "id": "101e2d89-0ea1-4f2d-8544-af6579a71e44",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -64,
+        -176
+      ],
+      "id": "2ab7fa4e-8959-44f4-b269-6bd4facc4435",
+      "name": "When clicking ‘Execute workflow’"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Send an Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        []
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "cb7c3ef1-57ba-4882-86d8-cc98c55c0ff7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b90f6b29ef58519ce7559fb1961c096434d96e4cb2de79a056916947d1c86eeb"
+  },
+  "nodeGroups": [],
+  "id": "sY8Nwq0IVzExOFRK",
+  "tags": []
+}
